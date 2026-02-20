@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { v4 as uuidv4 } from 'uuid';
-import { redis, queueKey, gameKey, playerKey, lobbyPlayersKey } from '@/lib/redis';
-import { Game, Player, AiPersonality } from '@/lib/types';
+import { redis, queueKey, gameKey, playerKey, lobbyPlayersKey, lobbyKey } from '@/lib/redis';
+import { Game, Player, AiPersonality, Lobby } from '@/lib/types';
 import { pusherServer } from '@/lib/pusher';
 import { generateAiResponse, generateGreeting } from '@/lib/ai';
 
@@ -12,8 +12,6 @@ const aiPersonalities: AiPersonality[] = ['normal', 'quirky', 'too-perfect', 'su
 function getRandomPersonality(): AiPersonality {
   return aiPersonalities[Math.floor(Math.random() * aiPersonalities.length)];
 }
-
-const AI_FALLBACK_DELAY = 30000; // 30 seconds wait for human (extended for testing)
 
 async function sendAiStarterMessage(gameId: string, playerId: string, game: Game) {
   if (!game.isAiGame || !game.aiPersonality) return;
@@ -28,7 +26,7 @@ async function sendAiStarterMessage(gameId: string, playerId: string, game: Game
       const aiMessage = {
         id: uuidv4(),
         senderId: 'ai',
-        senderName: game.player2Name,
+        senderName: "",
         content,
         timestamp: Date.now(),
       };
@@ -40,7 +38,7 @@ async function sendAiStarterMessage(gameId: string, playerId: string, game: Game
     } catch (err) {
       console.error('AI starter message error:', err);
     }
-  }, 1000 + Math.random() * 1000); // 1-2 second delay
+  }, 1000 + Math.random() * 2000); // 1-2 second delay
 }
 
 export async function POST(request: NextRequest) {
@@ -54,117 +52,142 @@ export async function POST(request: NextRequest) {
       // Add player to queue (using Set to prevent duplicates)
       await redis.sadd(queueKey(lobbyId), playerId);
       
-      // Try immediate match with another human
+      // No automatic matching - players just wait in queue until trigger
+      
+      return NextResponse.json({ matched: false });
+    }
+
+    if (action === 'trigger') {
+      const { lobbyId } = body;
+      
+      // Get all queued players
       const queueMembers = await redis.smembers(queueKey(lobbyId));
       
-      if (queueMembers.length >= 2) {
-        // Get 2 random players from queue
-        const [p1Id, p2Id] = queueMembers.slice(0, 2);
-        
-        // Remove them from queue
-        await redis.srem(queueKey(lobbyId), p1Id, p2Id);
-        
-        if (p1Id === p2Id) {
-          await redis.sadd(queueKey(lobbyId), p1Id);
-          return NextResponse.json({ matched: false });
+      if (queueMembers.length < 2) {
+        return NextResponse.json({ error: 'Need at least 2 players to trigger match' }, { status: 400 });
+      }
+
+      // Clear the queue
+      await redis.del(queueKey(lobbyId));
+      
+      // Mark lobby as closed to prevent new joins
+      const lobbyData = await redis.get<string>(lobbyKey(lobbyId));
+      if (lobbyData) {
+        const lobby: Lobby = typeof lobbyData === 'string' ? JSON.parse(lobbyData) : lobbyData;
+        lobby.state = 'closed';
+        await redis.set(lobbyKey(lobbyId), JSON.stringify(lobby));
+      }
+      
+      // Create games ensuring every player gets matched
+      const games: Game[] = [];
+      
+      // Shuffle players
+      const shuffledPlayers = [...queueMembers].sort(() => Math.random() - 0.5);
+      
+      // Assign each player randomly to AI or human pool
+      const aiPlayers: string[] = [];
+      const humanPlayers: string[] = [];
+      
+      for (const playerId of shuffledPlayers) {
+        if (Math.random() < AI_CHANCE) {
+          aiPlayers.push(playerId);
+        } else {
+          humanPlayers.push(playerId);
         }
+      }
+      
+      // If odd number of human players, move the last one to AI
+      if (humanPlayers.length % 2 === 1) {
+        const lastHuman = humanPlayers.pop()!;
+        aiPlayers.push(lastHuman);
+      }
+      
+      // Create AI games for AI players
+      for (const playerId of aiPlayers) {
+        const playerData = await redis.get<string>(playerKey(playerId));
+        if (!playerData) continue;
+        
+        const player: Player = typeof playerData === 'string' ? JSON.parse(playerData) : playerData;
+        const gameId = uuidv4();
+        
+        const game: Game = {
+          id: gameId,
+          lobbyId,
+          player1Id: playerId,
+          player2Id: 'ai',
+          player1Name: player.name,
+          player2Name: player.name, // AI takes the same name for now
+          isAiGame: true,
+          aiPersonality: getRandomPersonality(),
+          messages: [],
+          startedAt: Date.now(),
+          status: 'active',
+        };
+
+        await redis.set(gameKey(gameId), JSON.stringify(game), { ex: 600 });
+        games.push(game);
+        
+        // Send AI starter message
+        sendAiStarterMessage(gameId, playerId, game);
+      }
+      
+      // Create human games by pairing human players
+      for (let i = 0; i < humanPlayers.length; i += 2) {
+        const p1Id = humanPlayers[i];
+        const p2Id = humanPlayers[i + 1];
         
         const [p1Data, p2Data] = await Promise.all([
           redis.get<string>(playerKey(p1Id)),
           redis.get<string>(playerKey(p2Id)),
         ]);
         
-        if (p1Data && p2Data) {
-          const p1: Player = typeof p1Data === 'string' ? JSON.parse(p1Data) : p1Data;
-          const p2: Player = typeof p2Data === 'string' ? JSON.parse(p2Data) : p2Data;
-          
-          const isAiGame = Math.random() < AI_CHANCE;
-          const gameId = uuidv4();
-          
-          const game: Game = {
-            id: gameId,
-            lobbyId,
-            player1Id: p1Id,
-            player2Id: isAiGame ? 'ai' : p2Id,
-            player1Name: p1.name,
-            player2Name: isAiGame ? p2.name : p2.name,
-            isAiGame,
-            aiPersonality: isAiGame ? getRandomPersonality() : undefined,
-            messages: [],
-            startedAt: Date.now(),
-            status: 'active',
-          };
+        if (!p1Data || !p2Data) continue;
+        
+        const p1: Player = typeof p1Data === 'string' ? JSON.parse(p1Data) : p1Data;
+        const p2: Player = typeof p2Data === 'string' ? JSON.parse(p2Data) : p2Data;
+        const gameId = uuidv4();
+        
+        const game: Game = {
+          id: gameId,
+          lobbyId,
+          player1Id: p1Id,
+          player2Id: p2Id,
+          player1Name: p1.name,
+          player2Name: p2.name,
+          isAiGame: false,
+          messages: [],
+          startedAt: Date.now(),
+          status: 'active',
+        };
 
-          await redis.set(gameKey(gameId), JSON.stringify(game), { ex: 600 });
-
-          // Add delay to ensure both players' Pusher subscriptions are ready
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          
-          await pusherServer.trigger(`player-${p1Id}`, 'game-start', {
-            gameId,
-            opponentName: game.player2Name,
-            isAiGame,
-          });
-
-          await pusherServer.trigger(`player-${p2Id}`, 'game-start', {
-            gameId,
-            opponentName: p1.name,
-            isAiGame,
-          });
-
-          return NextResponse.json({ matched: true, gameId, isAiGame });
-        }
+        await redis.set(gameKey(gameId), JSON.stringify(game), { ex: 600 });
+        games.push(game);
       }
+      
+      // Send Pusher events to all players after a delay
+      setTimeout(async () => {
+        for (const game of games) {
+          await pusherServer.trigger(`player-${game.player1Id}`, 'game-start', {
+            gameId: game.id,
+            opponentName: game.isAiGame ? "AI" : "Human",
+            isAiGame: game.isAiGame,
+          });
 
-      // No immediate match - set up AI fallback timer (DISABLED for testing)
-      // setTimeout(async () => {
-      //   try {
-      //     // Check if player is still in queue (not yet matched)
-      //     const queue = await redis.smembers(queueKey(lobbyId));
-      //     const playerIndex = queue.indexOf(playerId);
-      //     
-      //     if (playerIndex !== -1) {
-      //       // Remove player from queue
-      //       await redis.srem(queueKey(lobbyId), playerId);
-      //       
-      //       const playerData = await redis.get<string>(playerKey(playerId));
-      //       if (!playerData) return;
-      //       
-      //       const player: Player = typeof playerData === 'string' ? JSON.parse(playerData) : playerData;
-      //       
-      //       // Create AI game
-      //       const gameId = uuidv4();
-      //       const game: Game = {
-      //         id: gameId,
-      //         lobbyId,
-      //         player1Id: playerId,
-      //         player2Id: 'ai',
-      //         player1Name: player.name,
-      //         player2Name: 'Player ' + Math.floor(Math.random() * 1000),
-      //         isAiGame: true,
-      //         aiPersonality: getRandomPersonality(),
-      //         messages: [],
-      //         startedAt: Date.now(),
-      //         status: 'active',
-      //       };
-
-      //       await redis.set(gameKey(gameId), JSON.stringify(game), { ex: 600 });
-      //       
-      //       // Trigger AI starter message
-      //       await sendAiStarterMessage(gameId, playerId, game);
-      //       
-      //       await pusherServer.trigger(`player-${playerId}`, 'game-start', {
-      //         gameId,
-      //         opponentName: game.player2Name,
-      //         isAiGame: true,
-      //       });
-      //     }
-      //   } catch (err) {
-      //     console.error('AI fallback error:', err);
-      //   }
-      // }, AI_FALLBACK_DELAY);
-
-      return NextResponse.json({ matched: false });
+          if (!game.isAiGame) {
+            await pusherServer.trigger(`player-${game.player2Id}`, 'game-start', {
+              gameId: game.id,
+              opponentName: "Human",
+              isAiGame: game.isAiGame,
+            });
+          }
+        }
+      }, 1000);
+      
+      return NextResponse.json({ 
+        triggered: true, 
+        gamesCreated: games.length,
+        playersMatched: games.length * 2
+      });
     }
 
     if (action === 'message') {
@@ -180,7 +203,7 @@ export async function POST(request: NextRequest) {
       const message = {
         id: uuidv4(),
         senderId: playerId,
-        senderName: playerId === game.player1Id ? game.player1Name : game.player2Name,
+        senderName: "",
         content,
         timestamp: Date.now(),
       };
@@ -197,26 +220,29 @@ export async function POST(request: NextRequest) {
         // Generate AI response
         setTimeout(async () => {
           try {
-            const aiResponse = await generateAiResponse(game, game.aiPersonality!, game.messages);
+            const aiResponse = await generateAiResponse(game.aiPersonality!, game.messages);
             
             const aiMessage = {
               id: uuidv4(),
               senderId: 'ai',
-              senderName: game.player2Name,
+              senderName: "",
               content: aiResponse,
               timestamp: Date.now(),
             };
 
             game.messages.push(aiMessage);
+
             await redis.set(gameKey(gameId), JSON.stringify(game), { ex: 600 });
             
             await pusherServer.trigger(`player-${game.player1Id}`, 'message', aiMessage);
           } catch (err) {
             console.error('AI response error:', err);
           }
-        }, 1000 + Math.random() * 2000); // Random delay 1-3 seconds
+        }, 1000 + Math.random() * 2000);
       }
 
+      await redis.set(gameKey(gameId), JSON.stringify(game), { ex: 600 });
+      
       return NextResponse.json({ success: true });
     }
 
@@ -231,12 +257,14 @@ export async function POST(request: NextRequest) {
       const game: Game = typeof gameData === 'string' ? JSON.parse(gameData) : gameData;
       const isPlayer1 = playerId === game.player1Id;
       
+      const correctGuess = game.isAiGame ? 'ai' : 'human';
+      
       if (isPlayer1) {
         game.player1Guess = guess;
-        game.player1Correct = (guess === 'ai') === game.isAiGame;
+        game.player1Correct = guess === correctGuess;
       } else {
         game.player2Guess = guess;
-        game.player2Correct = (guess === 'human') === !game.isAiGame;
+        game.player2Correct = guess === correctGuess;
       }
 
       // Check if both guessed
@@ -298,8 +326,6 @@ export async function POST(request: NextRequest) {
 
       return NextResponse.json({ success: true });
     }
-
-    return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
   } catch (error) {
     console.error('Game API error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

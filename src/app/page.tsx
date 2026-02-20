@@ -47,6 +47,7 @@ export default function Home() {
         <MatchmakingScreen
           playerId={playerId}
           lobbyId={lobbyId}
+          lobbyCode={lobbyCode}
           onGameStart={handleGameStart}
         />
       )}

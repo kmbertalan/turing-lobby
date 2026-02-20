@@ -41,4 +41,6 @@ export interface Lobby {
   code: string;
   createdAt: number;
   maxPlayers: number;
+  state: 'open' | 'closed';
+  creatorId: string;
 }

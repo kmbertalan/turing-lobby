@@ -111,10 +111,7 @@ export default function LobbyScreen({ onJoin }: LobbyScreenProps) {
       <div className="flex flex-col items-center justify-center min-h-screen p-4 bg-gray-900 text-white">
         <div className="max-w-md w-full">
           <button
-            onClick={() => {
-              setMode(null);
-              setCreatedCode('');
-            }}
+            onClick={() => setMode(null)}
             className="text-gray-400 hover:text-white mb-4"
           >
             ← Back
@@ -122,67 +119,50 @@ export default function LobbyScreen({ onJoin }: LobbyScreenProps) {
 
           <h2 className="text-2xl font-bold mb-6">Create a Lobby</h2>
 
-          {loading ? (
-            <div className="text-center">
-              <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-              <p className="text-gray-400">Creating lobby...</p>
-            </div>
-          ) : createdCode ? (
-            <div className="text-center">
-              <p className="text-gray-400 mb-4">Share this code with friends:</p>
-              <div className="bg-gray-800 p-6 rounded-lg mb-6">
-                <p className="text-4xl font-mono font-bold tracking-wider">{createdCode}</p>
-              </div>
-              
-              <div className="space-y-4">
-                <input
-                  type="text"
-                  value={playerName}
-                  onChange={(e) => setPlayerName(e.target.value)}
-                  placeholder="Enter your name"
-                  className="w-full bg-gray-700 text-white px-4 py-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-                <button
-                  onClick={async () => {
-                    if (!playerName.trim()) {
-                      setError('Please enter your name');
-                      return;
-                    }
-                    setCode(createdCode);
-                    setLoading(true);
-                    setError('');
-                    try {
-                      const res = await fetch('/api/lobby', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                          action: 'join',
-                          code: createdCode,
-                          playerName: playerName.trim(),
-                        }),
-                      });
-                      const data = await res.json();
-                      if (data.error) {
-                        setError(data.error);
-                      } else {
-                        onJoin(data.playerId, data.lobbyId, data.code);
-                      }
-                    } catch (err) {
-                      setError('Something went wrong');
-                    } finally {
-                      setLoading(false);
-                    }
-                  }}
-                  disabled={loading || !playerName.trim()}
-                  className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-600 text-white font-bold py-4 px-6 rounded-lg"
-                >
-                  {loading ? 'Joining...' : 'Join Your Lobby'}
-                </button>
-              </div>
-            </div>
-          ) : (
-            <p className="text-red-400 text-center">Failed to create lobby. Please go back and try again.</p>
-          )}
+          <div className="space-y-4">
+            <input
+              type="text"
+              value={playerName}
+              onChange={(e) => setPlayerName(e.target.value)}
+              placeholder="Enter your name"
+              className="w-full bg-gray-700 text-white px-4 py-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <button
+              onClick={async () => {
+                if (!playerName.trim()) {
+                  setError('Please enter your name');
+                  return;
+                }
+
+                setLoading(true);
+                setError('');
+                try {
+                  const res = await fetch('/api/lobby', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      action: 'create',
+                      playerName: playerName.trim(),
+                    }),
+                  });
+                  const data = await res.json();
+                  if (data.error) {
+                    setError(data.error);
+                  } else {
+                    onJoin(data.playerId, data.lobbyId, data.code);
+                  }
+                } catch (err) {
+                  setError('Something went wrong');
+                } finally {
+                  setLoading(false);
+                }
+              }}
+              disabled={loading || !playerName.trim()}
+              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white font-bold py-4 px-6 rounded-lg"
+            >
+              {loading ? 'Creating...' : 'Create Lobby'}
+            </button>
+          </div>
 
           {error && <p className="text-red-400 mt-4 text-center">{error}</p>}
         </div>

@@ -13,7 +13,6 @@ const personalityPrompts: Record<AiPersonality, string> = {
 };
 
 export async function generateAiResponse(
-  game: Game,
   personality: AiPersonality,
   conversationHistory: Message[]
 ): Promise<string> {

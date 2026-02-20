@@ -70,8 +70,11 @@ export default function GameScreen({
     return () => clearInterval(timer);
   }, [phase]);
 
+  const lastMessage = messages[messages.length - 1];
+  const canSend = !lastMessage || lastMessage.senderId !== playerId;
+
   const sendMessage = async () => {
-    if (!input.trim()) return;
+    if (!input.trim() || !canSend) return;
     
     const message: Message = {
       id: Date.now().toString(),
@@ -116,6 +119,11 @@ export default function GameScreen({
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
+
+  // Auto-scroll to bottom when messages change
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
   if (phase === 'result') {
     return (
@@ -185,8 +193,8 @@ export default function GameScreen({
       {/* Header */}
       <div className="flex items-center justify-between p-4 bg-gray-800 border-b border-gray-700">
         <div>
-          <h1 className="font-bold">Chatting with {opponentName}</h1>
-          <p className="text-sm text-gray-400">{isAiGame ? 'Might be AI or Human...' : 'Human opponent'}</p>
+          <h1 className="font-bold">Anonymous Turing Test</h1>
+          <p className="text-sm text-gray-400">Can you tell if you're talking to a human or AI?</p>
         </div>
         <div className="text-xl font-mono font-bold text-yellow-400">
           {formatTime(timeLeft)}
@@ -230,7 +238,12 @@ export default function GameScreen({
           />
           <button
             onClick={sendMessage}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-bold"
+            disabled={!canSend}
+            className={`px-6 py-3 rounded-lg font-bold ${
+              canSend
+                ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                : 'bg-gray-400 text-gray-200 cursor-not-allowed'
+            }`}
           >
             Send
           </button>
