@@ -252,31 +252,9 @@ export async function POST(request: NextRequest) {
       const p1Guessed = game.player1Guess !== undefined;
       const p2Guessed = game.isAiGame || game.player2Guess !== undefined;
 
-      if (p1Guessed && p2Guessed) {
-        game.status = 'finished';
+      game.status = (p1Guessed && p2Guessed) ? 'finished' : 'guessing';
+      if (game.status === 'finished') {
         game.endedAt = Date.now();
-        
-        if (game.player1Correct) {
-          const p1Data = await redis.get<string>(playerKey(game.player1Id));
-          if (p1Data) {
-          const p1: Player = typeof p1Data === 'string' ? JSON.parse(p1Data) : p1Data;
-            p1.score += 1;
-            p1.gamesPlayed += 1;
-            await redis.set(playerKey(game.player1Id), JSON.stringify(p1));
-          }
-        }
-
-        if (!game.isAiGame && game.player2Correct) {
-          const p2Data = await redis.get<string>(gameKey(gameId).replace('game:', 'player:').replace(gameId, game.player2Id));
-          if (p2Data) {
-            const p2: Player = typeof p2Data === 'string' ? JSON.parse(p2Data) : p2Data;
-            p2.score += 1;
-            p2.gamesPlayed += 1;
-            await redis.set(playerKey(game.player2Id), JSON.stringify(p2));
-          }
-        }
-      } else {
-        game.status = 'guessing';
       }
 
       await redis.set(gameKey(gameId), JSON.stringify(game), { ex: 600 });
@@ -284,10 +262,10 @@ export async function POST(request: NextRequest) {
       await pusherServer.trigger(`player-${game.player1Id}`, 'game-update', {
         yourGuess: game.player1Guess,
         opponentGuessed: game.isAiGame ? true : game.player2Guess !== undefined,
-        result: game.status === 'finished' ? {
+        result: p1Guessed ? {
           isAiGame: game.isAiGame,
           youCorrect: game.player1Correct,
-          opponentCorrect: game.isAiGame ? undefined : game.player2Correct,
+          opponentCorrect: game.isAiGame ? undefined : (p2Guessed ? game.player2Correct : undefined),
         } : null,
       });
 
@@ -295,7 +273,7 @@ export async function POST(request: NextRequest) {
         await pusherServer.trigger(`player-${game.player2Id}`, 'game-update', {
           yourGuess: game.player2Guess,
           opponentGuessed: game.player1Guess !== undefined,
-          result: game.status === 'finished' ? {
+          result: p2Guessed ? {
             isAiGame: game.isAiGame,
             youCorrect: game.player2Correct,
             opponentCorrect: game.player1Correct,

@@ -4,9 +4,10 @@ interface GameGuessingProps {
   opponentName: string;
   myGuess: 'human' | 'ai' | null;
   submitGuess: (guess: 'human' | 'ai') => void;
+  setPhase: (phase: 'chatting' | 'guessing' | 'result') => void;
 }
 
-export default function GameGuessing({ opponentName, myGuess, submitGuess }: GameGuessingProps) {
+export default function GameGuessing({ opponentName, myGuess, submitGuess, setPhase }: GameGuessingProps) {
   return (
     <div className="flex flex-col items-center justify-center min-h-screen p-4 bg-gray-900 text-white">
       <div className="max-w-md w-full bg-gray-800 rounded-lg p-6 text-center">
@@ -18,13 +19,13 @@ export default function GameGuessing({ opponentName, myGuess, submitGuess }: Gam
         ) : (
           <div className="flex gap-4">
             <button
-              onClick={() => submitGuess('human')}
+              onClick={async () => { await submitGuess('human'); setPhase('result'); }}
               className="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold py-4 px-6 rounded-lg"
             >
               Human
             </button>
             <button
-              onClick={() => submitGuess('ai')}
+              onClick={async () => { await submitGuess('ai'); setPhase('result'); }}
               className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-6 rounded-lg"
             >
               AI

@@ -25,7 +25,7 @@ export default function GameScreen({
 }: GameScreenProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
-  const [timeLeft, setTimeLeft] = useState(10);
+  const [timeLeft, setTimeLeft] = useState(120);
   const [phase, setPhase] = useState<'chatting' | 'guessing' | 'result'>('chatting');
   const [myGuess, setMyGuess] = useState<'human' | 'ai' | null>(null);
   const [result, setResult] = useState<any>(null);
@@ -91,7 +91,7 @@ export default function GameScreen({
   }
 
   if (phase === 'guessing') {
-    return <GameGuessing opponentName={opponentName} myGuess={myGuess} submitGuess={submitGuess} />;
+    return <GameGuessing opponentName={opponentName} myGuess={myGuess} submitGuess={submitGuess} setPhase={setPhase} />;
   }
 
   return (
