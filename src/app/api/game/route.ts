@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { v4 as uuidv4 } from 'uuid';
-import { redis, queueKey, gameKey, playerKey, lobbyPlayersKey, lobbyKey } from '@/lib/redis';
+import { redis, queueKey, gameKey, playerKey, lobbyKey } from '@/lib/redis';
 import { Game, Player, AiPersonality, Lobby } from '@/lib/types';
 import { pusherServer } from '@/lib/pusher';
 import { generateAiResponse, generateGreeting } from '@/lib/ai';
+
+export const runtime = "nodejs";
+export const preferredRegion = "fra1";
 
 const AI_CHANCE = 0.5;
 const aiPersonalities: AiPersonality[] = ['normal', 'quirky', 'too-perfect', 'suspicious'];
@@ -12,31 +15,34 @@ function getRandomPersonality(): AiPersonality {
   return aiPersonalities[Math.floor(Math.random() * aiPersonalities.length)];
 }
 
+function sleep(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 async function sendAiStarterMessage(gameId: string, playerId: string, game: Game) {
   if (!game.isAiGame || !game.aiPersonality) return;
   if (Math.random() >= 0.5) return;
   
-  setTimeout(async () => {
-    try {
-      if (!game.aiPersonality) return;
-      const content = await generateGreeting(game.aiPersonality);
-      
-      const aiMessage = {
-        id: uuidv4(),
-        senderId: 'ai',
-        senderName: "",
-        content,
-        timestamp: Date.now(),
-      };
+  await sleep(1000 + Math.random() * 2000);
+  try {
+    if (!game.aiPersonality) return;
+    const content = await generateGreeting(game.aiPersonality);
+    
+    const aiMessage = {
+      id: uuidv4(),
+      senderId: 'ai',
+      senderName: "",
+      content,
+      timestamp: Date.now(),
+    };
 
-      game.messages.push(aiMessage);
-      await redis.set(gameKey(gameId), JSON.stringify(game), { ex: 600 });
-      
-      await pusherServer.trigger(`player-${playerId}`, 'message', aiMessage);
-    } catch (err) {
-      console.error('AI starter message error:', err);
-    }
-  }, 1000 + Math.random() * 2000); // 1-2 second delay
+    game.messages.push(aiMessage);
+    await redis.set(gameKey(gameId), JSON.stringify(game), { ex: 600 });
+    
+    await pusherServer.trigger(`player-${playerId}`, 'message', aiMessage);
+  } catch (err) {
+    console.error('AI starter message error:', err);
+  }
 }
 
 export async function POST(request: NextRequest) {
