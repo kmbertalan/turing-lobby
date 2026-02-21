@@ -1,5 +1,5 @@
 import Groq from 'groq-sdk';
-import { AiPersonality, Game, Message } from './types';
+import { AiPersonality, Message } from './types';
 
 const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY || '',

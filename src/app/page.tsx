@@ -1,9 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import LobbyScreen from '@/components/LobbyScreen';
-import MatchmakingScreen from '@/components/MatchmakingScreen';
-import GameScreen from '@/components/GameScreen';
+import LobbyScreen from '@/components/screens/LobbyScreen';
+import MatchmakingScreen from '@/components/screens/MatchmakingScreen';
+import GameScreen from '@/components/screens/GameScreen';
 
 type Screen = 'lobby' | 'matchmaking' | 'game';
 

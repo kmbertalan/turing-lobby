@@ -6,7 +6,6 @@ import { pusherServer } from '@/lib/pusher';
 import { generateAiResponse, generateGreeting } from '@/lib/ai';
 
 const AI_CHANCE = 0.5;
-const GAME_DURATION = 120000; // 2 minutes
 const aiPersonalities: AiPersonality[] = ['normal', 'quirky', 'too-perfect', 'suspicious'];
 
 function getRandomPersonality(): AiPersonality {
@@ -15,11 +14,10 @@ function getRandomPersonality(): AiPersonality {
 
 async function sendAiStarterMessage(gameId: string, playerId: string, game: Game) {
   if (!game.isAiGame || !game.aiPersonality) return;
-  if (Math.random() >= 0.5) return; // Only 50% of the time
+  if (Math.random() >= 0.5) return;
   
   setTimeout(async () => {
     try {
-      // Generate a personalized greeting based on the persona
       if (!game.aiPersonality) return;
       const content = await generateGreeting(game.aiPersonality);
       
@@ -49,10 +47,7 @@ export async function POST(request: NextRequest) {
     if (action === 'queue') {
       const { playerId, lobbyId } = body;
       
-      // Add player to queue (using Set to prevent duplicates)
       await redis.sadd(queueKey(lobbyId), playerId);
-      
-      // No automatic matching - players just wait in queue until trigger
       
       return NextResponse.json({ matched: false });
     }
@@ -60,17 +55,14 @@ export async function POST(request: NextRequest) {
     if (action === 'trigger') {
       const { lobbyId } = body;
       
-      // Get all queued players
       const queueMembers = await redis.smembers(queueKey(lobbyId));
       
       if (queueMembers.length < 2) {
         return NextResponse.json({ error: 'Need at least 2 players to trigger match' }, { status: 400 });
       }
 
-      // Clear the queue
       await redis.del(queueKey(lobbyId));
       
-      // Mark lobby as closed to prevent new joins
       const lobbyData = await redis.get<string>(lobbyKey(lobbyId));
       if (lobbyData) {
         const lobby: Lobby = typeof lobbyData === 'string' ? JSON.parse(lobbyData) : lobbyData;
@@ -78,13 +70,10 @@ export async function POST(request: NextRequest) {
         await redis.set(lobbyKey(lobbyId), JSON.stringify(lobby));
       }
       
-      // Create games ensuring every player gets matched
       const games: Game[] = [];
       
-      // Shuffle players
       const shuffledPlayers = [...queueMembers].sort(() => Math.random() - 0.5);
       
-      // Assign each player randomly to AI or human pool
       const aiPlayers: string[] = [];
       const humanPlayers: string[] = [];
       
@@ -96,13 +85,11 @@ export async function POST(request: NextRequest) {
         }
       }
       
-      // If odd number of human players, move the last one to AI
       if (humanPlayers.length % 2 === 1) {
         const lastHuman = humanPlayers.pop()!;
         aiPlayers.push(lastHuman);
       }
       
-      // Create AI games for AI players
       for (const playerId of aiPlayers) {
         const playerData = await redis.get<string>(playerKey(playerId));
         if (!playerData) continue;
@@ -116,7 +103,7 @@ export async function POST(request: NextRequest) {
           player1Id: playerId,
           player2Id: 'ai',
           player1Name: player.name,
-          player2Name: player.name, // AI takes the same name for now
+          player2Name: player.name,
           isAiGame: true,
           aiPersonality: getRandomPersonality(),
           messages: [],
@@ -127,11 +114,9 @@ export async function POST(request: NextRequest) {
         await redis.set(gameKey(gameId), JSON.stringify(game), { ex: 600 });
         games.push(game);
         
-        // Send AI starter message
         sendAiStarterMessage(gameId, playerId, game);
       }
       
-      // Create human games by pairing human players
       for (let i = 0; i < humanPlayers.length; i += 2) {
         const p1Id = humanPlayers[i];
         const p2Id = humanPlayers[i + 1];
@@ -164,7 +149,6 @@ export async function POST(request: NextRequest) {
         games.push(game);
       }
       
-      // Send Pusher events to all players after a delay
       setTimeout(async () => {
         for (const game of games) {
           await pusherServer.trigger(`player-${game.player1Id}`, 'game-start', {
@@ -211,13 +195,11 @@ export async function POST(request: NextRequest) {
       game.messages.push(message);
       await redis.set(gameKey(gameId), JSON.stringify(game), { ex: 600 });
 
-      // Broadcast to opponent
       const opponentId = playerId === game.player1Id ? game.player2Id : game.player1Id;
       
       if (opponentId !== 'ai') {
         await pusherServer.trigger(`player-${opponentId}`, 'message', message);
       } else {
-        // Generate AI response
         setTimeout(async () => {
           try {
             const aiResponse = await generateAiResponse(game.aiPersonality!, game.messages);
@@ -267,7 +249,6 @@ export async function POST(request: NextRequest) {
         game.player2Correct = guess === correctGuess;
       }
 
-      // Check if both guessed
       const p1Guessed = game.player1Guess !== undefined;
       const p2Guessed = game.isAiGame || game.player2Guess !== undefined;
 
@@ -275,7 +256,6 @@ export async function POST(request: NextRequest) {
         game.status = 'finished';
         game.endedAt = Date.now();
         
-        // Update scores
         if (game.player1Correct) {
           const p1Data = await redis.get<string>(playerKey(game.player1Id));
           if (p1Data) {
@@ -301,7 +281,6 @@ export async function POST(request: NextRequest) {
 
       await redis.set(gameKey(gameId), JSON.stringify(game), { ex: 600 });
 
-      // Notify players
       await pusherServer.trigger(`player-${game.player1Id}`, 'game-update', {
         yourGuess: game.player1Guess,
         opponentGuessed: game.isAiGame ? true : game.player2Guess !== undefined,
