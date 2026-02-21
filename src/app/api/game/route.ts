@@ -5,9 +5,6 @@ import { Game, Player, AiPersonality, Lobby } from '@/lib/types';
 import { pusherServer } from '@/lib/pusher';
 import { generateAiResponse, generateGreeting } from '@/lib/ai';
 
-export const runtime = "nodejs";
-export const preferredRegion = "fra1";
-
 const AI_CHANCE = 0.5;
 const aiPersonalities: AiPersonality[] = ['normal', 'quirky', 'too-perfect', 'suspicious'];
 
