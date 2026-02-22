@@ -1,7 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { pusherClient } from '@/lib/pusher';
+import { useState, useEffect, useRef } from 'react';
 import { Message } from '@/lib/types';
 import { useGameScreen } from '@/hooks/useGameScreen';
 import GameResult from '../GameResult';
@@ -30,30 +29,34 @@ export default function GameScreen({
   const [myGuess, setMyGuess] = useState<'human' | 'ai' | null>(null);
   const [result, setResult] = useState<any>(null);
 
- 
+  const lastIndexRef = useRef(0);
 
   useEffect(() => {
-    const channel = pusherClient.subscribe(`player-${playerId}`);
-    
-    channel.bind('message', (message: Message) => {
-      if (message.senderId === playerId) return;
-      setMessages(prev => [...prev, message]);
-    });
-
-    channel.bind('game-update', (data: any) => {
-      if (data.result) {
-        setPhase('result');
-        setResult(data.result);
-      } else if (data.yourGuess) {
-        setMyGuess(data.yourGuess);
-        setPhase('guessing');
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/events?playerId=${playerId}&lastIndex=${lastIndexRef.current}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        for (const event of data.events) {
+          if (event.type === 'message') {
+            setMessages(prev => [...prev, event.payload]);
+          } else if (event.type === 'game-update') {
+            const payload = event.payload;
+            if (payload.result) {
+              setPhase('result');
+              setResult(payload.result);
+            } else if (payload.yourGuess) {
+              setMyGuess(payload.yourGuess);
+              setPhase('guessing');
+            }
+          }
+        }
+        lastIndexRef.current = data.nextIndex;
+      } catch (err) {
+        console.error('Polling error:', err);
       }
-    });
-
-    return () => {
-      channel.unbind_all();
-      pusherClient.unsubscribe(`player-${playerId}`);
-    };
+    }, 1500);
+    return () => clearInterval(interval);
   }, [playerId]);
 
   // Countdown timer

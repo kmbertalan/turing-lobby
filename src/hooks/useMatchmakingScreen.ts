@@ -1,6 +1,6 @@
 'use client';
 
-import { pusherClient } from '@/lib/pusher';
+import { useGameScreen } from './useGameScreen';
 
 interface UseMatchmakingProps {
   playerId: string;
@@ -10,8 +10,6 @@ interface UseMatchmakingProps {
   setIsHost: (isHost: boolean) => void;
   setTriggering: (triggering: boolean) => void;
   triggering: boolean;
-  channelRef: React.RefObject<any>;
-  gameStartedRef: React.RefObject<boolean>;
 }
 
 export function useMatchmaking({
@@ -22,22 +20,7 @@ export function useMatchmaking({
   setIsHost,
   setTriggering,
   triggering,
-  channelRef,
-  gameStartedRef,
 }: UseMatchmakingProps) {
-  const handleGameStart = (data: any) => {
-    if (gameStartedRef.current) return;
-    
-    gameStartedRef.current = true;
-    onGameStart(data.gameId, data.opponentName, data.isAiGame);
-    
-    if (channelRef.current) {
-      channelRef.current.unbind('game-start', handleGameStart);
-      pusherClient.unsubscribe(`player-${playerId}`);
-      channelRef.current = null;
-    }
-  };
-
   const checkHostStatus = async () => {
     try {
       const res = await fetch(`/api/lobby?checkHost=true&lobbyId=${lobbyId}&playerId=${playerId}`);
@@ -107,5 +90,5 @@ export function useMatchmaking({
     }
   };
 
-  return { handleGameStart, checkHostStatus, fetchQueueSize, enterQueue, triggerMatch };
+  return { checkHostStatus, fetchQueueSize, enterQueue, triggerMatch };
 }

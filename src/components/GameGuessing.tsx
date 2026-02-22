@@ -19,13 +19,13 @@ export default function GameGuessing({ opponentName, myGuess, submitGuess, setPh
         ) : (
           <div className="flex gap-4">
             <button
-              onClick={async () => { await submitGuess('human'); setPhase('result'); }}
+              onClick={() => submitGuess('human')}
               className="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold py-4 px-6 rounded-lg"
             >
               Human
             </button>
             <button
-              onClick={async () => { await submitGuess('ai'); setPhase('result'); }}
+              onClick={() => submitGuess('ai')}
               className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-6 rounded-lg"
             >
               AI

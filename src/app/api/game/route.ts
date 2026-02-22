@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { v4 as uuidv4 } from 'uuid';
 import { redis, queueKey, gameKey, playerKey, lobbyKey } from '@/lib/redis';
 import { Game, Player, AiPersonality, Lobby } from '@/lib/types';
-import { pusherServer } from '@/lib/pusher';
 import { generateAiResponse, generateGreeting } from '@/lib/ai';
+import { pushEvent } from '@/lib/events';
 
 const AI_CHANCE = 0.5;
 const aiPersonalities: AiPersonality[] = ['normal', 'quirky', 'too-perfect', 'suspicious'];
@@ -36,7 +36,7 @@ async function sendAiStarterMessage(gameId: string, playerId: string, game: Game
     game.messages.push(aiMessage);
     await redis.set(gameKey(gameId), JSON.stringify(game), { ex: 600 });
     
-    await pusherServer.trigger(`player-${playerId}`, 'message', aiMessage);
+    await pushEvent(playerId, { type: 'message', payload: aiMessage });
   } catch (err) {
     console.error('AI starter message error:', err);
   }
@@ -154,18 +154,10 @@ export async function POST(request: NextRequest) {
       
       setTimeout(async () => {
         for (const game of games) {
-          await pusherServer.trigger(`player-${game.player1Id}`, 'game-start', {
-            gameId: game.id,
-            opponentName: game.isAiGame ? "AI" : "Human",
-            isAiGame: game.isAiGame,
-          });
+          await pushEvent(game.player1Id, { type: 'game-start', payload: { gameId: game.id, opponentName: game.isAiGame ? "AI" : "Human", isAiGame: game.isAiGame } });
 
           if (!game.isAiGame) {
-            await pusherServer.trigger(`player-${game.player2Id}`, 'game-start', {
-              gameId: game.id,
-              opponentName: "Human",
-              isAiGame: game.isAiGame,
-            });
+            await pushEvent(game.player2Id, { type: 'game-start', payload: { gameId: game.id, opponentName: "Human", isAiGame: game.isAiGame } });
           }
         }
       }, 1000);
@@ -201,7 +193,7 @@ export async function POST(request: NextRequest) {
       const opponentId = playerId === game.player1Id ? game.player2Id : game.player1Id;
       
       if (opponentId !== 'ai') {
-        await pusherServer.trigger(`player-${opponentId}`, 'message', message);
+        await pushEvent(opponentId, { type: 'message', payload: message });
       } else {
         setTimeout(async () => {
           try {
@@ -219,7 +211,7 @@ export async function POST(request: NextRequest) {
 
             await redis.set(gameKey(gameId), JSON.stringify(game), { ex: 600 });
             
-            await pusherServer.trigger(`player-${game.player1Id}`, 'message', aiMessage);
+            await pushEvent(game.player1Id, { type: 'message', payload: aiMessage });
           } catch (err) {
             console.error('AI response error:', err);
           }
@@ -262,7 +254,7 @@ export async function POST(request: NextRequest) {
 
       await redis.set(gameKey(gameId), JSON.stringify(game), { ex: 600 });
 
-      await pusherServer.trigger(`player-${game.player1Id}`, 'game-update', {
+      await pushEvent(game.player1Id, { type: 'game-update', payload: {
         yourGuess: game.player1Guess,
         opponentGuessed: game.isAiGame ? true : game.player2Guess !== undefined,
         result: p1Guessed ? {
@@ -270,10 +262,10 @@ export async function POST(request: NextRequest) {
           youCorrect: game.player1Correct,
           opponentCorrect: game.isAiGame ? undefined : (p2Guessed ? game.player2Correct : undefined),
         } : null,
-      });
+      } });
 
       if (!game.isAiGame) {
-        await pusherServer.trigger(`player-${game.player2Id}`, 'game-update', {
+        await pushEvent(game.player2Id, { type: 'game-update', payload: {
           yourGuess: game.player2Guess,
           opponentGuessed: game.player1Guess !== undefined,
           result: p2Guessed ? {
@@ -281,7 +273,7 @@ export async function POST(request: NextRequest) {
             youCorrect: game.player2Correct,
             opponentCorrect: game.player1Correct,
           } : null,
-        });
+        } });
       }
 
       return NextResponse.json({ success: true });

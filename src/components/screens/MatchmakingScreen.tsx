@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
-import { pusherClient } from '@/lib/pusher';
 import { useMatchmaking } from '@/hooks/useMatchmakingScreen';
 import MatchmakingUI from '../MatchmakingUI';
 
@@ -24,10 +23,17 @@ export default function MatchmakingScreen({
   const [isHost, setIsHost] = useState(false);
   const [triggering, setTriggering] = useState(false);
 
-  const channelRef = useRef<any>(null);
+  const lastIndexRef = useRef(0);
+
+  const handleGameStart = (data: any) => {
+    if (gameStartedRef.current) return;
+    gameStartedRef.current = true;
+    onGameStart(data.gameId, data.opponentName, data.isAiGame);
+  };
+
   const gameStartedRef = useRef(false);
 
-  const { handleGameStart, checkHostStatus, fetchQueueSize, enterQueue, triggerMatch } = useMatchmaking({
+  const { checkHostStatus, fetchQueueSize, enterQueue, triggerMatch } = useMatchmaking({
     playerId,
     lobbyId,
     onGameStart,
@@ -35,37 +41,36 @@ export default function MatchmakingScreen({
     setIsHost,
     setTriggering,
     triggering,
-    channelRef,
-    gameStartedRef,
   });
-
-  const cleanupTimeout = setTimeout(() => {
-    if (!gameStartedRef.current) {
-      if (channelRef.current) {
-        channelRef.current.unbind('game-start', handleGameStart);
-        pusherClient.unsubscribe(`player-${playerId}`);
-        channelRef.current = null;
-      }
-    }
-  }, 120000);
 
   useEffect(() => {
     if (gameStartedRef.current) return;
     
-    const channel = pusherClient.subscribe(`player-${playerId}`);
-    channelRef.current = channel;
-    
-    channel.bind('game-start', handleGameStart);
-
     checkHostStatus();
     fetchQueueSize();
     enterQueue();
 
     const queueUpdateInterval = setInterval(fetchQueueSize, 2000);
 
+    const pollInterval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/events?playerId=${playerId}&lastIndex=${lastIndexRef.current}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        for (const event of data.events) {
+          if (event.type === 'game-start') {
+            handleGameStart(event.payload);
+          }
+        }
+        lastIndexRef.current = data.nextIndex;
+      } catch (err) {
+        console.error('Polling error:', err);
+      }
+    }, 1500);
+
     return () => {
-      clearTimeout(cleanupTimeout);
       clearInterval(queueUpdateInterval);
+      clearInterval(pollInterval);
     };
   }, [playerId, lobbyId, onGameStart]);
 
