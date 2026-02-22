@@ -21,9 +21,14 @@ async function sendAiStarterMessage(gameId: string, playerId: string, game: Game
   if (Math.random() >= 0.5) return;
   
   await sleep(1000 + Math.random() * 2000);
+
+  const latestGameData = await redis.get<string>(gameKey(gameId));
+  if (!latestGameData) return;
+  const latestGame: Game = typeof latestGameData === 'string' ? JSON.parse(latestGameData) : latestGameData;
+  if (latestGame.messages.length > 0) return;
+  
   try {
-    if (!game.aiPersonality) return;
-    const content = await generateGreeting(game.aiPersonality);
+    const content = await generateGreeting(latestGame.aiPersonality!);
     
     const aiMessage = {
       id: uuidv4(),
@@ -33,8 +38,8 @@ async function sendAiStarterMessage(gameId: string, playerId: string, game: Game
       timestamp: Date.now(),
     };
 
-    game.messages.push(aiMessage);
-    await redis.set(gameKey(gameId), JSON.stringify(game), { ex: 600 });
+    latestGame.messages.push(aiMessage);
+    await redis.set(gameKey(gameId), JSON.stringify(latestGame), { ex: 600 });
     
     await pushEvent(playerId, { type: 'message', payload: aiMessage });
   } catch (err) {
