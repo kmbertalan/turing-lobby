@@ -4,6 +4,7 @@ import { redis, queueKey, gameKey, playerKey, lobbyKey } from '@/lib/redis';
 import { Game, Player, AiPersonality, Lobby } from '@/lib/types';
 import { generateAiResponse, generateGreeting } from '@/lib/ai';
 import { pushEvent } from '@/lib/events';
+import { calculateTypingDelay } from '@/lib/ai';
 
 const AI_CHANCE = 0.5;
 const aiPersonalities: AiPersonality[] = ['normal', 'quirky', 'too-perfect', 'suspicious'];
@@ -20,26 +21,32 @@ async function sendAiStarterMessage(gameId: string, playerId: string, game: Game
   if (!game.isAiGame || !game.aiPersonality) return;
   if (Math.random() >= 0.5) return;
   
-  await sleep(1000 + Math.random() * 2000);
-
   const latestGameData = await redis.get<string>(gameKey(gameId));
   if (!latestGameData) return;
   const latestGame: Game = typeof latestGameData === 'string' ? JSON.parse(latestGameData) : latestGameData;
   if (latestGame.messages.length > 0) return;
   
   try {
-    const content = await generateGreeting(latestGame.aiPersonality!);
+    const greetingData = await generateGreeting(latestGame.aiPersonality!);
+    const delay = calculateTypingDelay(greetingData.greeting.length, latestGame.aiPersonality!);
+    await sleep(delay);
+    
+    // Check again after delay if conversation has started
+    const updatedGameData = await redis.get<string>(gameKey(gameId));
+    if (!updatedGameData) return;
+    const updatedGame: Game = typeof updatedGameData === 'string' ? JSON.parse(updatedGameData) : updatedGameData;
+    if (updatedGame.messages.length > 0) return;
     
     const aiMessage = {
       id: uuidv4(),
       senderId: 'ai',
       senderName: "",
-      content,
+      content: greetingData.greeting,
       timestamp: Date.now(),
     };
 
-    latestGame.messages.push(aiMessage);
-    await redis.set(gameKey(gameId), JSON.stringify(latestGame), { ex: 600 });
+    updatedGame.messages.push(aiMessage);
+    await redis.set(gameKey(gameId), JSON.stringify(updatedGame), { ex: 600 });
     
     await pushEvent(playerId, { type: 'message', payload: aiMessage });
   } catch (err) {
@@ -159,10 +166,10 @@ export async function POST(request: NextRequest) {
       
       setTimeout(async () => {
         for (const game of games) {
-          await pushEvent(game.player1Id, { type: 'game-start', payload: { gameId: game.id, opponentName: game.isAiGame ? "AI" : "Human", isAiGame: game.isAiGame } });
+          await pushEvent(game.player1Id, { type: 'game-start', payload: { gameId: game.id, opponentName: game.isAiGame ? "AI" : game.player2Name, isAiGame: game.isAiGame } });
 
           if (!game.isAiGame) {
-            await pushEvent(game.player2Id, { type: 'game-start', payload: { gameId: game.id, opponentName: "Human", isAiGame: game.isAiGame } });
+            await pushEvent(game.player2Id, { type: 'game-start', payload: { gameId: game.id, opponentName: game.player1Name, isAiGame: game.isAiGame } });
           }
         }
       }, 1000);
@@ -200,10 +207,11 @@ export async function POST(request: NextRequest) {
       if (opponentId !== 'ai') {
         await pushEvent(opponentId, { type: 'message', payload: message });
       } else {
+        const aiResponse = await generateAiResponse(game.aiPersonality!, game.messages);
+        const delay = calculateTypingDelay(aiResponse.length, game.aiPersonality!);
+        
         setTimeout(async () => {
           try {
-            const aiResponse = await generateAiResponse(game.aiPersonality!, game.messages);
-            
             const aiMessage = {
               id: uuidv4(),
               senderId: 'ai',
@@ -220,7 +228,7 @@ export async function POST(request: NextRequest) {
           } catch (err) {
             console.error('AI response error:', err);
           }
-        }, 1000 + Math.random() * 2000);
+        }, delay);
       }
 
       await redis.set(gameKey(gameId), JSON.stringify(game), { ex: 600 });

@@ -90,7 +90,7 @@ export default function GameScreen({
   });
 
   if (phase === 'result') {
-    return <GameResult isAiGame={isAiGame} result={result} onGameEnd={onGameEnd} />;
+    return <GameResult isAiGame={isAiGame} result={result} onGameEnd={onGameEnd} opponentName={opponentName} />;
   }
 
   if (phase === 'guessing') {
